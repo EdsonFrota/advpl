@@ -1,0 +1,1044 @@
+#include "protheus.ch"
+
+/*/-------------------------------------------------------------------
+Programa: COMWSENT
+Autor: Maiki Perin
+Data: 22/12/2022
+Descrição: Integração Tasy - Documento de Entrada       
+------------------------------------------------------------------/*/
+
+/**********************************/
+User Function COMWSENT(oSay,nOpcao)
+/**********************************/
+
+Local aArea         := GetArea()
+Local aAreaSF1      := SF1->(GetArea())
+Local aAreaSD1      := SD1->(GetArea())
+Local aAreaSE2      := SE2->(GetArea())
+Local aAreaSB1      := SB1->(GetArea())
+
+Local lRet          := .T.
+
+Local cHost         := SuperGetMv("MV_XHOSTTA",.F.,"http://10.64.60.106:9090/api")
+Local cToken        := "kjG0a0trgbk91V4Lyk6aJk8lC5QGp9OwKX5NzLADxpo4oEB8QRZR7AgrKbsofA80"
+Local aHeader       := {}
+
+Private cPref       := AllTrim(GetMv("MV_2DUPREF"))
+
+Private cChvNf      := AllTrim(SF1->F1_DOC)//+AllTrim(SF1->F1_SERIE)+AllTrim(SF1->F1_FORNECE)+AllTrim(SF1->F1_LOJA)
+
+Private cDoc        := Space(TamSX3("F1_DOC")[1])
+Private cSerie      := Space(TamSX3("F1_SERIE")[1])
+Private cFornece    := Space(TamSX3("F1_FORNECE")[1])
+Private cLoja       := Space(TamSX3("F1_LOJA")[1])
+
+Private cCgcFor     := AllTrim(Posicione("SA2",1,xFilial("SA2")+SF1->F1_FORNECE+SF1->F1_LOJA,"A2_CGC"))
+
+Private lFin        := .F.
+Private cNaturez    := ""
+Private cNotes      := ""
+
+Private cIdNfTasy   := ""
+
+Do Case
+	Case Alltrim(SF1->F1_FILIAL) == "01"
+		cPref := "ALM"
+	Case Alltrim(SF1->F1_FILIAL) == "02"
+		cPref := "SAU"
+	Case Alltrim(SF1->F1_FILIAL) == "03"
+		cPref := "CTO"
+	Case Alltrim(SF1->F1_FILIAL) == "04"
+		cPref := "FLM"
+	Case Alltrim(SF1->F1_FILIAL) == "05"
+		cPref := "SAU"
+	Case Alltrim(SF1->F1_FILIAL) == "06"
+		cPref := "CAL"
+	Case Alltrim(SF1->F1_FILIAL) == "07"
+		cPref := "LRV"
+	Case Alltrim(SF1->F1_FILIAL) == "08"
+		cPref := "QUI"
+	Case Alltrim(SF1->F1_FILIAL) == "09"
+		cPref := "CPS"
+	Case Alltrim(SF1->F1_FILIAL) == "10"
+		cPref := "SPA"
+	Case Alltrim(SF1->F1_FILIAL) == "11"
+		cPref := "NAI"
+	Case Alltrim(SF1->F1_FILIAL) == "12"
+		cPref := "JDA"
+	Case Alltrim(SF1->F1_FILIAL) == "13"
+		cPref := "CTA"
+	Case Alltrim(SF1->F1_FILIAL) == "14"
+		cPref := "CDU"
+	Case Alltrim(SF1->F1_FILIAL) == "15"
+		cPref := "ESB"
+	Case Alltrim(SF1->F1_FILIAL) == "16"
+		cPref := "PSF"
+	Case Alltrim(SF1->F1_FILIAL) == "17"
+		cPref := "PCA"
+	Case Alltrim(SF1->F1_FILIAL) == "18"
+		cPref := "UMA"
+	Case Alltrim(SF1->F1_FILIAL) == "19"
+		cPref := "UCR"	
+	Case Alltrim(SF1->F1_FILIAL) == "20"
+		cPref := "UMI"		
+	OtherWise
+		cPref := "FIN"			
+End Case 
+
+SE2->(DbSetOrder(6)) // E2_FILIAL+E2_FORNECE+E2_LOJA+E2_PREFIXO+E2_NUM+E2_PARCELA+E2_TIPO
+If SE2->(DbSeek(xFilial("SE2")+SF1->F1_FORNECE+SF1->F1_LOJA+cPref+SF1->F1_DOC))
+    lFin        := .T.
+    cNaturez    := AllTrim(Posicione("SED",1,xFilial("SED")+SE2->E2_NATUREZ,"ED_XIDTAS")) //"1212"
+    cNotes      := AllTrim(SE2->E2_HIST)
+Else
+    MsgAlert("A Natureza Financeira não está correta. Por gentileza informe novamente para prosseguir")
+    Return
+EndIf
+
+aAdd(aHeader,"Content-Type: application/json")
+aAdd(aHeader,"BifrostMessageType: sync")
+aAdd(aHeader,"Authorization: Bearer " + cToken)
+
+If nOpcao == 3 // Inclusão
+
+    If SF1->F1_XINTTAS <> "I" // Diferente de Integrado
+
+        lRet := IntNf(cHost,aHeader)
+
+        If lRet // Nota Fiscal Integrada
+            
+            lRet := IntIt(cHost,aHeader)
+
+            If lRet // Itens Integrados
+
+                //IntItImp(cHost,aHeader)
+                //IntNfImp(cHost,aHeader)
+                If lFin
+                    IntNfFin(cHost,aHeader)
+                EndIf
+            EndIf
+        EndIf
+    Else
+
+        cIdNfTasy := AllTrim(SF1->F1_XIDTAS)
+        
+        lRet := IntIt(cHost,aHeader)
+
+        If lRet // Itens Integrados
+
+            //IntItImp(cHost,aHeader)
+            //IntNfImp(cHost,aHeader)
+            If lFin
+                IntNfFin(cHost,aHeader)
+            EndIf
+        EndIf
+    EndIf
+
+Else // Exclusão
+    IntDelNf(nOpcao,cHost,aHeader)
+EndIf
+
+If lRet
+    MsgInfo("Processamento finalizado. Nota Fiscal ["+AllTrim(SF1->F1_DOC)+"] integrada junto ao software Tasy, gerado ID Tasy ["+AllTrim(cIdNfTasy)+"].","Atenção")
+EndIf
+
+RestArea(aAreaSB1)
+RestArea(aAreaSE2)
+RestArea(aAreaSD1)
+RestArea(aAreaSF1)
+RestArea(aArea)
+
+Return
+
+/***********************************/
+Static Function IntNf(cHost,aHeader)
+/***********************************/
+
+Local lRet      := .T.
+
+Local cBody     := ""
+
+Local oRestNf   := NIL
+Local cPathNf   := SuperGetMv("MV_XPATHNF",.F.,"/invoice") 
+
+Local cJsonRNf  := ""
+Local oJsonRNf  := NIL
+
+Local cRet      := ""
+Local cMsgErro  := ""
+
+Local nFilTasy  := 0
+Local cDtEmis   := SubStr(DToS(SF1->F1_EMISSAO),1,4)+"-"+SubStr(DToS(SF1->F1_EMISSAO),5,2)+"-"+SubStr(DToS(SF1->F1_EMISSAO),7,2)
+Local cDtDig    := SubStr(DToS(SF1->F1_DTDIGIT),1,4)+"-"+SubStr(DToS(SF1->F1_DTDIGIT),5,2)+"-"+SubStr(DToS(SF1->F1_DTDIGIT),7,2)
+
+Local nOperId   := 0 /*SuperGetMv("MV_XOPERID",.F.,33)*/
+
+If SD1->D1_TES == "076"
+    nOperId := SuperGetMv("MV_XOPERID",.F.,22)
+ElseIf SD1->D1_TES == "050"
+    nOperId := SuperGetMv("MV_XOPERID",.F.,33)
+ElseIf SD1->D1_TES == "073"
+    nOperId := SuperGetMv("MV_XOPERID",.F.,33)
+ElseIf SD1->D1_TES == "079"
+    nOperId := SuperGetMv("MV_XOPERID",.F.,33)
+ElseIf SD1->D1_TES == "083"
+    nOperId := SuperGetMv("MV_XOPERID",.F.,33)
+Else  // Valor diferente de 076, 050, 073, 079 ou 083
+    nOperId := SuperGetMv("MV_XOPERID",.F.,33)
+EndIf
+
+/*LOCAL aOperIdMap := {|cTesVal, nOperIdVal|,;
+                        {"076", 22},;
+                        {"050", 33},;
+                        {"073", 33},;
+                        {"079", 33},;
+                        {"083", 33} }
+
+nOperId := SuperGetMv("MV_XOPERID",.F.,33)
+    IF SD1->D1_TES == oMap[1]
+        nOperId := oMap[2]
+        EXIT
+    ENDIF
+NEXT*/
+
+Local nPayId    := SuperGetMv("MV_XPAYID",.F.,960)
+
+cBody := '{'
+cBody += '"invoiceType":"INCOMING",'
+cBody += '"invoiceCode":"'+cChvNf+'",'
+cBody += '"invoiceOperationId":'+cValToChar(nOperId)+','
+cBody += '"legalEntityId":"'+AllTrim(cCgcFor)+'",'
+If !Empty(cNaturez)
+    cBody += '"natureOperation":{' 
+    cBody += '"id":'+cNaturez+''
+    cBody += '},'
+EndIf
+cBody += '"paymentTermId":'+cValToChar(nPayId)+',' //'+cValToChar(Val(SF1->F1_COND))+','
+cBody += '"issueDate":"'+cDtEmis+'",'
+cBody += '"outgoingInvoiceDate":"'+cDtDig+'",'
+cBody += '"series":"'+AllTrim(SF1->F1_SERIE)+'",'
+cBody += '"supplierId": "'+cCgcFor+'",'
+cBody += '"notes":"'+cNotes+'",'
+cBody += '"userName":"'+Lower(AllTrim(cUserName))+'",'
+cBody += '"disccounts":'+cValToChar(SF1->F1_DESCONT)+','
+cBody += '"disbursementExpense":'+cValToChar(SF1->F1_DESPESA)+','
+cBody += '"insurance":'+cValToChar(SF1->F1_SEGURO)+','
+cBody += '"merchandiseValue":'+cValToChar(SF1->F1_VALMERC)+','
+cBody += '"invoiceTotalValue":'+cValToChar(SF1->F1_VALBRUT - SF1->F1_DESCONT)+','
+
+// establishment
+If SF1->F1_FILIAL == "02" // (SAU)
+    nFilTasy := 1
+ElseIf SF1->F1_FILIAL == "03" // (CEU)
+    nFilTasy := 3
+ElseIf SF1->F1_FILIAL == "14" // (CDU)
+    nFilTasy := 28
+ElseIf SF1->F1_FILIAL == "19" // (SAU PED)
+    nFilTasy := 34
+EndIf
+cBody += '"establishment":{'
+
+cBody += '"id":'+cValToChar(nFilTasy)+''
+cBody += '},'
+cBody += '"valueFreight":'+cValToChar(SF1->F1_FRETE)+''
+cBody += '}'
+
+// Cria objeto REST para Adicionar Nota Fiscal
+oRestNf := FWRest():New(cHost)
+oRestNf:setPath(cPathNf)
+oRestNf:SetPostParams(cBody)
+
+// Realiza consulta
+If oRestNf:Post(aHeader)
+
+    // Retorno da chamada
+    cJsonRNf := oRestNf:GetResult()
+
+    // Converte a string JSON
+    oJsonRNf := JsonObject():New()
+    cRet  := oJsonRNf:FromJson(cJsonRNf)
+
+    If ValType(cRet) == "U"
+
+        cIdNfTasy := cValToChar(oJsonRNf['id'])
+
+        // Atualiza Flag 
+        If RecLock("SF1",.F.)
+            SF1->F1_XINTTAS := "I" // Integrado
+            SF1->F1_XIDTAS := cIdNfTasy
+            SF1->(MsUnlock())
+        EndIf
+    Else
+
+        lRet := .F.
+
+        // Atualiza Flag 
+        If RecLock("SF1",.F.)
+            SF1->F1_XINTTAS := "E" // Erro
+            SF1->(MsUnlock())
+        EndIf            
+
+        cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+        cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+        cMsgErro += "Path = " + AllTrim(cPathNf) + CRLF
+        cMsgErro += "JSON = " + AllTrim(cBody) + CRLF
+        cMsgErro += "Erro = " + cRet
+        
+        Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+    EndIf
+
+Else
+
+    lRet := .F.
+
+    // Atualiza Flag 
+    If RecLock("SF1",.F.)
+        SF1->F1_XINTTAS := "E" // Erro
+        SF1->(MsUnlock())
+    EndIf
+
+    cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+    cMsgErro += "JSON = " + AllTrim(cBody) + CRLF
+    cMsgErro += "Erro = " + oRestNf:GetLastError()
+
+    Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+EndIf
+
+FreeObj(oRestNf)
+FreeObj(oJsonRNf)
+
+Return lRet
+
+/***********************************/
+Static Function IntIt(cHost,aHeader)
+/***********************************/
+
+Local lRet      := .T.
+
+Local cBody     := ""
+
+Local oRestIt   := NIL
+Local cPathIt   := StrTran(SuperGetMv("MV_XPATHIT",.F.,"/invoice/{invoiceId}/items"),"{invoiceId}",cIdNfTasy)
+
+Local cJsonRIt  := ""
+Local oJsonRIt  := NIL
+
+Local cRet      := ""
+Local cMsgErro  := ""
+
+Local aItens    := {}
+Local nI
+
+Local cIdPrdTas := ""
+/*Local cDtValid  := IIF(!Empty(SD1->D1_DTVALID),;
+                       SubStr(DToS(SD1->D1_DTVALID),1,4)+"-"+SubStr(DToS(SD1->D1_DTVALID),5,2)+"-"+SubStr(DToS(SD1->D1_DTVALID),7,2) + "T23:59:59Z",;
+                       "")*/
+Local cDtValid  := IIF(!Empty(SD1->D1_DTVALFR),;
+                       SubStr(DToS(SD1->D1_DTVALFR),1,4)+"-"+SubStr(DToS(SD1->D1_DTVALFR),5,2)+"-"+SubStr(DToS(SD1->D1_DTVALFR),7,2) + "T23:59:59Z",;
+                       "")
+Local nLocEst   := 0
+Local cUm       := ""
+
+SB1->(DbSetOrder(1)) // B1_FILIAL+B1_COD
+
+SD1->(DbSetOrder(1)) // D1_FILIAL+D1_DOC+D1_SERIE+D1_FORNECE+D1_LOJA+D1_COD+D1_ITEM
+If SD1->(DbSeek(xFilial("SD1")+SF1->F1_DOC+SF1->F1_SERIE+SF1->F1_FORNECE+SF1->F1_LOJA))
+
+    cBody := '['
+
+    While SD1->(!EOF()) .And. SD1->D1_FILIAL == xFilial("SD1") .And. SD1->D1_DOC == SF1->F1_DOC .And. SD1->D1_SERIE == SF1->F1_SERIE .And.; 
+        SD1->D1_FORNECE == SF1->F1_FORNECE .And. SD1->D1_LOJA == SF1->F1_LOJA
+
+        If SD1->D1_XINTTAS <> "I" // Diferente de Integrado
+
+            If SB1->(DbSeek(xFilial("SB1")+SD1->D1_COD))
+                
+                cIdPrdTas := SB1->B1_XIDTAS
+                
+                If Empty(cIdPrdTas)
+                    lRet := .F.
+                    Aviso("Atenção","Produto ["+AllTrim(SD1->D1_COD)+"] não possui código Tasy informado. Operação cancelada.",{"Fechar"},3,,,,.T.)
+                    Return .F.
+                EndiF
+            Else
+                lRet := .F.
+                Aviso("Atenção","Produto ["+AllTrim(SD1->D1_COD)+"] não localizado. Operação cancelada.",{"Fechar"},3,,,,.T.)
+                Return .F.
+            EndIf
+
+            aAdd(aItens,{SD1->D1_DOC,SD1->D1_SERIE,SD1->D1_FORNECE,SD1->D1_LOJA,SD1->D1_COD,SD1->D1_ITEM})
+
+            cBody += '{'
+            cBody += '"itemId":'+cValToChar(Val(AllTrim(SD1->D1_ITEM)))+','
+            cBody += '"materialId":'+cValToChar(Val(AllTrim(cIdPrdTas)))+','
+            //cBody += '"purchaseOrder": '+cValToChar(Val(AllTrim(SD1->D1_PEDIDO)))+','
+            If !Empty(cNaturez)
+                cBody += '"natureOperation":{'
+                cBody += '"id":'+cNaturez+','
+                cBody += '"operation":"ENTRY"'
+                cBody += '},'
+            EndIf
+            cBody += '"supplierId": "'+cCgcFor+'",'
+            cBody += '"netValue":'+cValToChar(SD1->D1_TOTAL)+','
+            cBody += '"totalAmountItem":'+cValToChar(SD1->D1_QUANT * SD1->D1_VUNIT)+','
+            cBody += '"discountValue":'+cValToChar(SD1->D1_VALDESC)+','
+            cBody += '"discount":'+cValToChar(SD1->D1_DESC)+','
+            cBody += '"unitValue":'+cValToChar(SD1->D1_VUNIT)+','
+            cBody += '"amount":'+cValToChar(SD1->D1_QUANT)+','
+            cBody += '"freight":'+cValToChar(SD1->D1_VALFRE)+','
+            cBody += '"disbursementExpense":'+cValToChar(SD1->D1_DESPESA)+','
+            /*cBody += '"apportionmentDiscountValue":'+cValToChar(SF1->F1_DESCONT)+',' COMENTADO POR EDSON*/
+            cBody += '"stockAmount":'+cValToChar(SD1->D1_QUANT)+','
+            cBody += '"insuranceValue":'+cValToChar(SD1->D1_SEGURO)+','
+            
+            cUm := Posicione("SAH",1,xFilial("SAH")+SD1->D1_UM,"AH_XIDTAS")
+            cBody += '"purchaseUnitMeasurement":"'+AllTrim(cUm)+'",'
+            cBody += '"stockUnitMeasurement":"'+AllTrim(cUm)+'",'
+
+            // establishment
+            If SF1->F1_FILIAL == "02" // (SAU)
+                nFilTasy := 1
+            ElseIf SF1->F1_FILIAL == "03" // (CEU)
+                nFilTasy := 3
+            ElseIf SF1->F1_FILIAL == "14" // (CDU)
+                nFilTasy := 28
+            ElseIf SF1->F1_FILIAL == "19" // (SAU PED)
+                nFilTasy := 34
+            EndIf
+            // stockLocationId
+            If nFilTasy == 1 // Farmácia Central
+                nLocEst := 1
+            ElseIf nFilTasy == 3 // Farmácia Central - CTO
+                nLocEst := 24
+            ElseIf nFilTasy == 28 // Dispensário Farmacêutico - CDU
+                nLocEst := 28
+            ElseIf nFilTasy == 34 // PED - Farmácia Central
+                nLocEst := 40
+            EndIf
+            cBody += '"stockLocationId":"'+cValToChar(nLocEst)+'",'
+            cBody += '"batch":"'+AllTrim(/*SD1->D1_LOTECTL*/SD1->D1_LOTEFOR)+'",'
+            cBody += '"expiration":"'+cDtValid+'",'
+            cBody += '"establishment":'+cValToChar(nFilTasy)+','
+            cBody += '"invoiceCode":"'+cChvNf+'"'
+        EndIf
+
+        SD1->(DbSkip())
+
+        If SD1->(!EOF()) .And. SD1->D1_FILIAL == xFilial("SD1") .And. SD1->D1_DOC == SF1->F1_DOC .And. SD1->D1_SERIE == SF1->F1_SERIE .And.; 
+            SD1->D1_FORNECE == SF1->F1_FORNECE .And. SD1->D1_LOJA == SF1->F1_LOJA
+        
+            cBody += '},'
+        EndIf
+    EndDo
+
+    cBody += '}]'
+EndIf
+
+If Len(aItens) > 0 // Há itens a Integrar
+
+    // Cria objeto REST para Adicionar Item na Nota Fiscal
+    oRestIt := FWRest():New(cHost)
+    oRestIt:setPath(cPathIt)
+    oRestIt:SetPostParams(cBody)
+
+    // Realiza consulta
+    If oRestIt:Post(aHeader)
+
+        // Retorno da chamada
+        cJsonRIt := oRestIt:GetResult()
+
+        // Converte a string JSON
+        oJsonRIt := JsonObject():New()
+        cRet  := oJsonRIt:FromJson(cJsonRIt)
+
+        If ValType(cRet) == "U"
+            
+            For nI := 1 To Len(aItens)
+
+                If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                    // Atualiza Flag 
+                    If RecLock("SD1",.F.)
+                        SD1->D1_XINTTAS := "I" // Integrado
+                        SD1->(MsUnlock())
+                    EndIf
+                EndIf
+            Next nI
+        Else
+
+            lRet := .F.
+
+            For nI := 1 To Len(aItens)
+
+                If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                    // Atualiza Flag 
+                    If RecLock("SD1",.F.)
+                        SD1->D1_XINTTAS := "E" // Erro
+                        SD1->(MsUnlock())
+                    EndIf
+                EndIf
+            Next nI
+
+            cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+            cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+            cMsgErro += "Path = " + AllTrim(cPathNf) + CRLF
+            cMsgErro += "Erro = " + cRet
+            
+            Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+        EndIf
+    Else
+
+        lRet := .F.
+
+        For nI := 1 To Len(aItens)
+
+            If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                // Atualiza Flag 
+                If RecLock("SD1",.F.)
+                    SD1->D1_XINTTAS := "E" // Erro
+                    SD1->(MsUnlock())
+                EndIf
+            EndIf
+        Next nI
+
+        cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+        cMsgErro += "JSON = " + AllTrim(cBody) + CRLF
+        cMsgErro += "Erro = " + oRestIt:GetLastError()
+
+        Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+    EndIf
+
+    FreeObj(oRestIt)
+    FreeObj(oJsonRIt)
+EndIf
+
+Return lRet 
+
+/**************************************/
+Static Function IntItImp(cHost,aHeader)
+/**************************************/
+
+Local cBody         := ""
+
+Local oRestItImp    := NIL
+Local cPathItImp    := SuperGetMv("MV_XPATHII",.F.,"/invoice/{invoiceId}/items/{itemId}/taxes") 
+
+Local cJsonRItIm    := ""
+Local oJsonRItIm    := NIL
+
+Local cRet          := ""
+Local cMsgErro      := ""
+
+Local aItens        := {}
+Local nI
+
+If SD1->(DbSeek(xFilial("SD1")+SF1->F1_DOC+SF1->F1_SERIE+SF1->F1_FORNECE+SF1->F1_LOJA))
+
+    cBody := '['
+
+    While SD1->(!EOF()) .And. SD1->D1_FILIAL == xFilial("SD1") .And. SD1->D1_DOC == SF1->F1_DOC .And. SD1->D1_SERIE == SF1->F1_SERIE .And.; 
+        SD1->D1_FORNECE == SF1->F1_FORNECE .And. SD1->D1_LOJA == SF1->F1_LOJA
+
+        If SD1->D1_XIMPTAS <> "I" // Diferente de Integrado
+
+            aAdd(aItens,{SD1->D1_DOC,SD1->D1_SERIE,SD1->D1_FORNECE,SD1->D1_LOJA,SD1->D1_COD,SD1->D1_ITEM})
+
+            cBody := '{'
+            cBody += '"invoiceId": 2554276,'
+            cBody += '"taxId": 62,'
+            cBody += '"itemId": 11,'
+            cBody += '"calculationBase": 500,'
+            cBody += '"baseReduction": 25,'
+            cBody += '"taxRate": 10,'
+            cBody += '"taxValue": 10000,'
+            cBody += '"cst": "90",'
+            cBody += '"csosn": "101",'
+            cBody += '"taxSituationServiceProvisionId": 18,'
+            cBody += '"valueBaseNotWithheld": 0,'
+            cBody += '"seriesSequence": "1",'
+            cBody += '"series": "99",'
+            cBody += '"lastUpdate": "2019-12-13T15:11:31.555",'
+            cBody += '"userName": "Integration",'
+            cBody += '"isApportionment": true,'
+            cBody += '"valueTaxNotWithheld": 0,' 
+            cBody += '"additionalTaxValue": 0,'
+            cBody += '"additionalBaseValue": 0,'
+            cBody += '"establishment": {'
+            cBody += '"id": 1'
+            cBody += '}'
+
+            If SD1->(!EOF())
+                cBody += '}]'
+            Else
+                cBody += '},'
+            EndIf
+        EndIf
+
+        SD1->(DbSkip())
+    EndDo
+EndIf
+
+If Len(aItens) > 0 // Há Impostos a Integrar
+
+    // Cria objeto REST para Adicionar Tributo do Item
+    oRestItImp := FWRest():New(cHost)
+    oRestItImp:setPath(cPathItImp)
+    oRestItImp:SetPostParams(cBody)
+
+    // Realiza consulta
+    If oRestItImp:Post(aHeader)
+
+        // Retorno da chamada
+        cJsonRItIm := oRestItImp:GetResult()
+
+        // Converte a string JSON
+        oJsonRItIm := JsonObject():New()
+        cRet  := oJsonRItIm:FromJson(cJsonRItIm)
+
+        If ValType(cRet) == "U"
+            
+            If oJsonRItIm['status'] <> 201 // Resposta diferente de Ok
+                
+                For nI := 1 To Len(aItens)
+
+                    If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                        // Atualiza Flag 
+                        If RecLock("SD1",.F.)
+                            SD1->D1_XIMPTAS := "I" // Integrado
+                            SD1->(MsUnlock())
+                        EndIf
+                    EndIf
+                Next nI
+            Else
+
+                For nI := 1 To Len(aItens)
+
+                    If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                        // Atualiza Flag 
+                        If RecLock("SD1",.F.)
+                            SD1->D1_XIMPTAS := "E" // Erro
+                            SD1->(MsUnlock())
+                        EndIf
+                    EndIf
+                Next nI
+
+                cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+                cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+                cMsgErro += "Path = " + AllTrim(cPathNf) + CRLF
+                cMsgErro += "Erro = " + cRet
+                
+                Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+            EndIf
+
+        Else
+
+            For nI := 1 To Len(aItens)
+
+                If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                    // Atualiza Flag 
+                    If RecLock("SD1",.F.)
+                        SD1->D1_XIMPTAS := "E" // Erro
+                        SD1->(MsUnlock())
+                    EndIf
+                EndIf
+            Next nI
+
+            cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+            cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+            cMsgErro += "Path = " + AllTrim(cPathNf) + CRLF
+            cMsgErro += "Erro = " + cRet
+            
+            Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+        EndIf
+    Else
+
+        For nI := 1 To Len(aItens)
+
+            If SD1->(DbSeek(xFilial("SD1")+aItens[nI][1]+aItens[nI][2]+aItens[nI][3]+aItens[nI][4]+aItens[nI][5]+aItens[nI][6]))
+
+                // Atualiza Flag 
+                If RecLock("SD1",.F.)
+                    SD1->D1_XINTTAS := "E" // Erro
+                    SD1->(MsUnlock())
+                EndIf
+            EndIf
+        Next nI
+
+        Aviso("Atenção",oRestNf:GetLastError(),{"Fechar"},3,,,,.T.)
+    EndIf
+
+    FreeObj(oRestItImp)
+    FreeObj(oJsonRItIm)
+EndIf
+
+Return
+
+/**************************************/
+Static Function IntNfImp(cHost,aHeader)
+/**************************************/
+
+Local cBody         := ""
+
+Local oRestNfImp    := NIL
+Local cPathNfImp    := SuperGetMv("MV_XPATHIN",.F.,"/invoice/{invoiceId}/taxes") 
+
+Local cJsonRNfIm    := ""
+Local oJsonRNfIm    := NIL
+
+Local cRet          := ""
+Local cMsgErro      := ""
+
+If SF1->F1_XIMPTAS <> "I" // Integrado
+
+    cBody := '[{'
+    cBody += '"id": 443679,'
+    cBody += '"invoiceId": 2585708,'
+    cBody += '"taxId": 7,'
+    cBody += '"calculationBase": 362.27,'
+    cBody += '"reductionValue": 0,'
+    cBody += '"taxRate": 0,'
+    cBody += '"taxValue": 20,'
+    cBody += '"baseValueNotWithheld": 0,'
+    cBody += '"additionalBaseValue": 0,'
+    cBody += '"valueTaxNotWithheld": 0,'
+    cBody += '"additionalTaxValue": 0,'
+    cBody += '"updatedAt": "2022-03-07T13:49:38.366Z",'
+    cBody += '"userName": "Integration"'
+    cBody += '}]'
+
+    // Cria objeto REST para Adicionar Tributo na Nota Fiscal
+    oRestNfImp := FWRest():New(cHost)
+    oRestNfImp:setPath(cPathNfImp)
+    oRestNfImp:SetPostParams(cBody)
+
+    // Realiza consulta
+    If oRestNfImp:Post(aHeader)
+
+        // Retorno da chamada
+        cJsonRNfIm := oRestNfImp:GetResult()
+
+        // Converte a string JSON
+        oJsonRNfIm := JsonObject():New()
+        cRet  := oJsonRNfIm:FromJson(cJsonRNfIm)
+
+        If ValType(cRet) == "U"
+            
+            If oJsonRNfIm['status'] == 201 // Resposta Ok
+
+                // Atualiza Flag 
+                If RecLock("SF1",.F.)
+                    SF1->F1_XIMPTAS := "I" // Integrado
+                    SF1->(MsUnlock())
+                EndIf
+            Else
+
+                // Atualiza Flag 
+                If RecLock("SF1",.F.)
+                    SF1->F1_XIMPTAS := "E" // Erro
+                    SF1->(MsUnlock())
+                EndIf
+
+                cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+                cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+                cMsgErro += "Path = " + AllTrim(cPathNfImp) + CRLF
+                cMsgErro += "Erro = " + cRet
+                
+                Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+            EndIf
+        Else
+
+            // Atualiza Flag 
+            If RecLock("SF1",.F.)
+                SF1->F1_XIMPTAS := "E" // Erro
+                SF1->(MsUnlock())
+            EndIf
+
+            cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+            cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+            cMsgErro += "Path = " + AllTrim(cPathNfImp) + CRLF
+            cMsgErro += "Erro = " + cRet
+            
+            Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+        EndIf
+    Else
+
+        // Atualiza Flag 
+        If RecLock("SF1",.F.)
+            SF1->F1_XIMPTAS := "E" // Erro
+            SF1->(MsUnlock())
+        EndIf
+
+        Aviso("Atenção",oRestNfImp:GetLastError(),{"Fechar"},3,,,,.T.)
+    EndIf
+
+    FreeObj(oRestNfImp)
+    FreeObj(oJsonRNfIm)
+EndIf
+
+Return
+
+/**************************************/
+Static Function IntNfFin(cHost,aHeader)
+/**************************************/
+
+Local nI
+Local aTit          := {}
+Local cBody         := ""
+
+Local oRestNfFin    := NIL
+Local cPathNfFin    := StrTran(SuperGetMv("MV_XPATHFI",.F.,"/invoice/{invoiceId}/dues"),"{invoiceId}",cIdNfTasy)
+
+Local cJsonRNfFi    := ""
+Local oJsonRNfFi    := NIL
+
+Local cRet          := ""
+Local cMsgErro      := ""
+
+Local cDtVencto     := SubStr(DToS(SE2->E2_VENCTO),1,4)+"-"+SubStr(DToS(SE2->E2_VENCTO),5,2)+"-"+SubStr(DToS(SE2->E2_VENCTO),7,2)
+
+While SE2->(!EOF()) .And. SE2->E2_FILIAL == SF1->F1_FILIAL .And. SE2->E2_FORNECE == SF1->F1_FORNECE .And. SE2->E2_LOJA == SF1->F1_LOJA .And.;
+    SE2->E2_PREFIXO == cPref .And. SE2->E2_NUM == SF1->F1_DOC
+
+    If SE2->E2_XINTTAS <> "I" // Diferente de Integrado
+
+        aAdd(aTit,SE2->(Recno()))
+
+        cBody := '{'
+        cBody += '"due":"'+cDtVencto+'",'
+        cBody += '"source":"N",'
+        cBody += '"value":'+cValToChar(SE2->E2_VALOR)+','
+        cBody += '"discount":'+cValToChar(SE2->E2_DESCONT)+','
+        cBody += '"financialDiscount":'+cValToChar(SE2->E2_DECRESC)+','
+        cBody += '"baseDueValue":'+cValToChar(SE2->E2_VALOR)+''
+        cBody += '}'
+    EndIf
+
+    SE2->(DbSkip())
+
+EndDo
+
+If Len(aTit) > 0 // Há itens a Integrar
+
+    // Cria objeto REST para Adicionar Vencimento na Nota Fiscal
+    oRestNfFin := FWRest():New(cHost)
+    oRestNfFin:setPath(cPathNfFin)
+    oRestNfFin:SetPostParams(cBody)
+
+    // Realiza consulta
+    If oRestNfFin:Post(aHeader)
+
+        // Retorno da chamada
+        cJsonRNfFi := oRestNfFin:GetResult()
+
+        // Converte a string JSON
+        oJsonRNfFi := JsonObject():New()
+        cRet  := oJsonRNfFi:FromJson(cJsonRNfFi)
+
+        If ValType(cRet) == "U"
+
+            For nI := 1 To Len(aTit)
+
+                SE2->(DbGoTo(aTit[nI]))
+
+                // Atualiza Flag 
+                If RecLock("SE2",.F.)
+                    SE2->E2_XINTTAS := "I" // Integrado
+                    SE2->(MsUnlock())
+                EndIf
+            Next nI
+
+        Else
+
+            For nI := 1 To Len(aTit)
+
+                SE2->(DbGoTo(aTit[nI]))
+
+                // Atualiza Flag 
+                If RecLock("SE2",.F.)
+                    SE2->E2_XINTTAS := "E" // Erro
+                    SE2->(MsUnlock())
+                EndIf
+            Next nI
+            
+            cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+            cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+            cMsgErro += "Path = " + AllTrim(cPathNfFin) + CRLF
+            cMsgErro += "Erro = " + cRet
+            
+            Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+        EndIf
+
+    Else
+            
+        // Atualiza Flag 
+        For nI := 1 To Len(aTit)
+
+            SE2->(DbGoTo(aTit[nI]))
+
+            // Atualiza Flag 
+            If RecLock("SE2",.F.)
+                SE2->E2_XINTTAS := "E" // Erro
+                SE2->(MsUnlock())
+            EndIf
+        Next nI
+
+        cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+        cMsgErro += "JSON = " + AllTrim(cBody) + CRLF
+        cMsgErro += "Erro = " + oRestNfFin:GetLastError()
+
+        Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+    EndIf
+
+    FreeObj(oRestNfFin)
+    FreeObj(oJsonRNfFi)
+EndIf
+
+Return 
+
+/*********************************************/
+Static Function IntDelNf(nOpcao,cHost,aHeader)
+/*********************************************/
+
+Local oRestNfDel    := NIL
+Local cPathNfDel    := StrTran(SuperGetMv("MV_XPATHCA",.F.,"/invoice/{invoiceId}"),"{invoiceId}",cIdNfTasy)
+
+Local cJsonRNfDe    := ""
+Local oJsonRNfDe    := NIL
+
+Local cRet          := ""
+Local cMsgErro      := ""
+
+SF1->(DbSetOrder(1)) // F1_FILIAL+F1_DOC+F1_SERIE+F1_FORNECE+F1_LOJA+F1_TIPO
+
+If nOpcao == 6 // Origem opção de menu customizada
+    
+    If !GetParams()
+        Return
+    EndIf
+Else
+    cDoc        := SF1->F1_DOC
+    cSerie      := SF1->F1_SERIE
+    cFornece    := SF1->F1_FORNECE
+    cLoja       := SF1->F1_LOJA
+EndIf    
+
+SET DELETE OFF
+
+If SF1->(DbSeek(xFilial("SF1")+cDoc+cSerie+cFornece+cLoja))
+
+    //Alert("Documento localizado.")
+
+    If SF1->F1_XDELTAS <> "I" // Integrado
+
+        // Cria objeto REST para Excluir Nota Fiscal
+        oRestNfDel := FWRest():New(cHost)
+        oRestNfDel:setPath(cPathNfDel)
+        //oRestNf:SetPostParams(cBody)
+
+        // Realiza consulta
+        If oRestNfDel:Delete(aHeader,cIdNfTasy)
+
+            // Retorno da chamada
+            cJsonRNfDe := oRestNfDel:GetResult()
+
+            // Converte a string JSON
+            oJsonRNfDe := JsonObject():New()
+            cRet  := oJsonRNfDe:FromJson(cJsonRNfDe)
+
+            If ValType(cRet) == "U"
+                
+                If oJsonRNfDe['status'] == 201 // Resposta diferente de Ok
+
+                    // Atualiza Flag 
+                    If RecLock("SF1",.F.)
+                        SF1->F1_XDELTAS := "I" // Integrado
+                        SF1->(MsUnlock())
+                    EndIf
+                Else
+
+                    // Atualiza Flag 
+                    If RecLock("SF1",.F.)
+                        SF1->F1_XDELTAS := "E" // Erro
+                        SF1->(MsUnlock())
+                    EndIf
+
+                    cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+                    cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+                    cMsgErro += "Path = " + AllTrim(cPathNf) + CRLF
+                    cMsgErro += "Erro = " + cRet
+                    
+                    Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+                EndIf
+            Else
+
+                // Atualiza Flag 
+                If RecLock("SF1",.F.)
+                    SF1->F1_XDELTAS := "E" // Erro
+                    SF1->(MsUnlock())
+                EndIf
+
+                cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+                cMsgErro += "Host = " + AllTrim(cHost) + CRLF
+                cMsgErro += "Path = " + AllTrim(cPathNf) + CRLF
+                cMsgErro += "Erro = " + cRet
+                
+                Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+            EndIf
+        Else
+
+            // Atualiza Flag 
+            If RecLock("SF1",.F.)
+                SF1->F1_XDELTAS := "E" // Erro
+                SF1->(MsUnlock())
+            EndIf
+
+            cMsgErro := "Erro no retorno da API. Dados:" + CRLF
+            cMsgErro += "JSON = " + AllTrim(cBody) + CRLF
+            cMsgErro += "Erro = " + oRestNf:GetLastError()
+
+            Aviso("Atenção",cMsgErro,{"Fechar"},3,,,,.T.)
+        EndIf
+
+        FreeObj(oRestNfDel)
+        FreeObj(oJsonRNfDe)
+    Else
+        Aviso("Atenção","Documento não integrado.",{"Fechar"},3,,,,.T.)
+    EndIf
+Else
+    Aviso("Atenção","Documento não encontrado.",{"Fechar"},3,,,,.T.)
+EndIf    
+
+SET DELETE ON
+
+Return
+
+/**************************/
+Static Function GetParams()
+/**************************/
+
+Local lRet      := .T.
+
+Local aPergs	:= {}
+Local aRetPar	:= {}
+
+AAdd(aPergs,{1, " Documento", cDoc, "@!", "", "", ".T.", 60, .T.})
+AAdd(aPergs,{1, " Série", cSerie, "@!", "", "", ".T.", 20, .T.})
+AAdd(aPergs,{1, " Fornecedor", cFornece, "@!", "", "SA2", ".T.", 40, .T.})
+AAdd(aPergs,{1, " Loja", cLoja, "@!", "", "", ".T.", 20, .T.})
+
+If ParamBox(aPergs,"Informe os Parâmetros",@aRetPar,{|| .T.},/*aButtons*/,/*lCentered*/,/*nPosX*/,/*nPosY*/,/*oDlgWizard*/,FunName(),.T./*lCanSave*/,.T./*lUserSave*/)
+	
+	cDoc        := aRetPar[1]
+	cSerie      := aRetPar[2]
+	cFornece    := aRetPar[3]
+	cLoja       := aRetPar[4]
+Else
+	lRet := .F.
+EndIf
+
+Return lRet
